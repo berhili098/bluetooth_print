@@ -35,10 +35,11 @@ android {
         minSdk = 21
     }
 
-   dependencies {
-    implementation files('libs/gprintersdkv2.jar')
-    implementation "androidx.core:core:1.6.0"
-}
+    dependencies {
+       
+        implementation files('libs/gprintersdkv2.jar')
+        implementation "androidx.core:core:1.6.0"
+
 
     }
 
