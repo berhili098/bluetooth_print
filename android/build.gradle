@@ -35,12 +35,10 @@ android {
         minSdk = 21
     }
 
-    dependencies {
-        testImplementation("junit:junit:4.13.2")
-        testImplementation("org.mockito:mockito-core:5.0.0")
-        implementation files('libs/gprintersdkv2.jar')
-        implementation "androidx.core:core:1.6.0"
-
+   dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation "androidx.core:core:1.6.0"
+}
 
     }
 
