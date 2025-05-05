@@ -11,8 +11,7 @@ class BluetoothDevice {
   int? type = 0;
   bool? connected = false;
 
-  factory BluetoothDevice.fromJson(Map<String, dynamic> json) =>
-      _$BluetoothDeviceFromJson(json);
+  factory BluetoothDevice.fromJson(Map<String, dynamic> json) => _$BluetoothDeviceFromJson(json);
   Map<String, dynamic> toJson() => _$BluetoothDeviceToJson(this);
 }
 
@@ -22,7 +21,7 @@ class LineText {
       {this.type, //text,barcode,qrcode,image(base64 string)
       this.content,
       this.size = 0,
-      this.align = ALIGN_LEFT,
+      this.align = 0,
       this.weight = 0, //0,1
       this.width = 0, //0,1
       this.height = 0, //0,1
@@ -77,7 +76,6 @@ class LineText {
   final int? x;
   final int? y;
 
-  factory LineText.fromJson(Map<String, dynamic> json) =>
-      _$LineTextFromJson(json);
+  factory LineText.fromJson(Map<String, dynamic> json) => _$LineTextFromJson(json);
   Map<String, dynamic> toJson() => _$LineTextToJson(this);
 }
