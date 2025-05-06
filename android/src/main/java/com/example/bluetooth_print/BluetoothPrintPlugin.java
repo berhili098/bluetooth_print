@@ -70,15 +70,18 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
           Manifest.permission.ACCESS_FINE_LOCATION
   };
 
+  // We can remove this old v1 registration method since we're using v2 embedding
+  // If you want to keep backward compatibility, you can keep it, but it's not necessary
+  @Deprecated
   public static void registerWith(Registrar registrar) {
-    final BluetoothPrintPlugin instance = new BluetoothPrintPlugin();
-
-    Activity activity = registrar.activity();
-    Application application = null;
-    if (registrar.context() != null) {
-      application = (Application) (registrar.context().getApplicationContext());
-    }
-    instance.setup(registrar.messenger(), application, activity, registrar, null);
+      final BluetoothPrintPlugin instance = new BluetoothPrintPlugin();
+      instance.setup(
+          registrar.messenger(),
+          (Application) registrar.context().getApplicationContext(),
+          registrar.activity(),
+          registrar,
+          null
+      );
   }
 
   public BluetoothPrintPlugin(){
