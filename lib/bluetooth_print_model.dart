@@ -4,15 +4,23 @@ part 'bluetooth_print_model.g.dart';
 
 @JsonSerializable(includeIfNull: false)
 class BluetoothDevice {
-  BluetoothDevice();
+  BluetoothDevice({
+    this.name,
+    this.address,
+    this.type = 0,
+    this.connected = false,
+  });
 
   String? name;
   String? address;
-  int? type = 0;
-  bool? connected = false;
+  int? type;
+  bool? connected;
 
   factory BluetoothDevice.fromJson(Map<String, dynamic> json) => _$BluetoothDeviceFromJson(json);
   Map<String, dynamic> toJson() => _$BluetoothDeviceToJson(this);
+
+  @override
+  String toString() => 'BluetoothDevice(name: $name, address: $address, type: $type, connected: $connected)';
 }
 
 @JsonSerializable(includeIfNull: false)

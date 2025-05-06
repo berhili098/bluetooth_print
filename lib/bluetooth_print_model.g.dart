@@ -7,11 +7,12 @@ part of 'bluetooth_print_model.dart';
 // **************************************************************************
 
 BluetoothDevice _$BluetoothDeviceFromJson(Map<String, dynamic> json) =>
-    BluetoothDevice()
-      ..name = json['name'] as String?
-      ..address = json['address'] as String?
-      ..type = (json['type'] as num?)?.toInt()
-      ..connected = json['connected'] as bool?;
+    BluetoothDevice(
+      name: json['name'] as String?,
+      address: json['address'] as String?,
+      type: (json['type'] as num?)?.toInt() ?? 0,
+      connected: json['connected'] as bool? ?? false,
+    );
 
 Map<String, dynamic> _$BluetoothDeviceToJson(BluetoothDevice instance) =>
     <String, dynamic>{
