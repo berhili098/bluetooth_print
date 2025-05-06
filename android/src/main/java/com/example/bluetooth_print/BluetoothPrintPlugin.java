@@ -70,23 +70,41 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
           Manifest.permission.ACCESS_FINE_LOCATION
   };
 
-  // We can remove this old v1 registration method since we're using v2 embedding
-  // If you want to keep backward compatibility, you can keep it, but it's not necessary
-  @Deprecated
-  public static void registerWith(Registrar registrar) {
-      final BluetoothPrintPlugin instance = new BluetoothPrintPlugin();
-      instance.setup(
-          registrar.messenger(),
-          (Application) registrar.context().getApplicationContext(),
-          registrar.activity(),
-          registrar,
-          null
-      );
+  // Remove the deprecated registerWith method since we're using v2 embedding
+  // @Deprecated
+  // public static void registerWith(Registrar registrar) {
+  //     final BluetoothPrintPlugin instance = new BluetoothPrintPlugin();
+  //     instance.setup(
+  //         registrar.messenger(),
+  //         (Application) registrar.context().getApplicationContext(),
+  //         registrar.activity(),
+  //         registrar,
+  //         null
+  //     );
+  // }
+  
+  // Update the setup method to remove Registrar parameter
+  private void setup(
+          final BinaryMessenger messenger,
+          final Application application,
+          final Activity activity,
+          final ActivityPluginBinding activityBinding) {
+      synchronized (initializationLock) {
+          Log.i(TAG, "setup");
+          this.activity = activity;
+          this.application = application;
+          this.context = application;
+          channel = new MethodChannel(messenger, NAMESPACE + "/methods");
+          channel.setMethodCallHandler(this);
+          stateChannel = new EventChannel(messenger, NAMESPACE + "/state");
+          stateChannel.setStreamHandler(stateHandler);
+          mBluetoothManager = (BluetoothManager) application.getSystemService(Context.BLUETOOTH_SERVICE);
+          mBluetoothAdapter = mBluetoothManager.getAdapter();
+          if (activityBinding != null) {
+              activityBinding.addRequestPermissionsResultListener(this);
+          }
+      }
   }
-
-  public BluetoothPrintPlugin(){
-  }
-
 
   @Override
   public void onAttachedToEngine(FlutterPluginBinding binding) {
@@ -105,7 +123,6 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
             pluginBinding.getBinaryMessenger(),
             (Application) pluginBinding.getApplicationContext(),
             activityBinding.getActivity(),
-            null,
             activityBinding);
   }
 
