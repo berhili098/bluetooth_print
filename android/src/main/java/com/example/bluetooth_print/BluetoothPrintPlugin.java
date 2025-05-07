@@ -70,41 +70,20 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
           Manifest.permission.ACCESS_FINE_LOCATION
   };
 
-  // Remove the deprecated registerWith method since we're using v2 embedding
-  // @Deprecated
-  // public static void registerWith(Registrar registrar) {
-  //     final BluetoothPrintPlugin instance = new BluetoothPrintPlugin();
-  //     instance.setup(
-  //         registrar.messenger(),
-  //         (Application) registrar.context().getApplicationContext(),
-  //         registrar.activity(),
-  //         registrar,
-  //         null
-  //     );
-  // }
-  
-  // Update the setup method to remove Registrar parameter
-  private void setup(
-          final BinaryMessenger messenger,
-          final Application application,
-          final Activity activity,
-          final ActivityPluginBinding activityBinding) {
-      synchronized (initializationLock) {
-          Log.i(TAG, "setup");
-          this.activity = activity;
-          this.application = application;
-          this.context = application;
-          channel = new MethodChannel(messenger, NAMESPACE + "/methods");
-          channel.setMethodCallHandler(this);
-          stateChannel = new EventChannel(messenger, NAMESPACE + "/state");
-          stateChannel.setStreamHandler(stateHandler);
-          mBluetoothManager = (BluetoothManager) application.getSystemService(Context.BLUETOOTH_SERVICE);
-          mBluetoothAdapter = mBluetoothManager.getAdapter();
-          if (activityBinding != null) {
-              activityBinding.addRequestPermissionsResultListener(this);
-          }
-      }
+  public static void registerWith(Registrar registrar) {
+    final BluetoothPrintPlugin instance = new BluetoothPrintPlugin();
+
+    Activity activity = registrar.activity();
+    Application application = null;
+    if (registrar.context() != null) {
+      application = (Application) (registrar.context().getApplicationContext());
+    }
+    instance.setup(registrar.messenger(), application, activity, registrar, null);
   }
+
+  public BluetoothPrintPlugin(){
+  }
+
 
   @Override
   public void onAttachedToEngine(FlutterPluginBinding binding) {
@@ -123,6 +102,7 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
             pluginBinding.getBinaryMessenger(),
             (Application) pluginBinding.getApplicationContext(),
             activityBinding.getActivity(),
+            null,
             activityBinding);
   }
 
@@ -315,27 +295,12 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
   private ScanCallback mScanCallback = new ScanCallback() {
     @Override
     public void onScanResult(int callbackType, ScanResult result) {
-        try {
-            BluetoothDevice device = result.getDevice();
-            if (device != null && device.getName() != null) {
-                invokeMethodUIThread("ScanResult", device);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error in scan callback: " + e.getMessage());
-            activity.runOnUiThread(() -> {
-                channel.invokeMethod("OnError", "Scan error: " + e.getMessage());
-            });
-        }
+      BluetoothDevice device = result.getDevice();
+      if(device != null && device.getName() != null){
+        invokeMethodUIThread("ScanResult", device);
+      }
     }
-
-    @Override
-    public void onScanFailed(int errorCode) {
-        Log.e(TAG, "Scan failed with error code: " + errorCode);
-        activity.runOnUiThread(() -> {
-            channel.invokeMethod("OnError", "Scan failed with error code: " + errorCode);
-        });
-    }
-};
+  };
 
   private void startScan() throws IllegalStateException {
     BluetoothLeScanner scanner = mBluetoothAdapter.getBluetoothLeScanner();
@@ -358,46 +323,35 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
   /**
    * 连接
    */
-  private void connect(MethodCall call, Result result) {
-      try {
-          Map<String, Object> args = call.arguments();
-          if (args == null || !args.containsKey("address")) {
-              result.error("invalid_argument", "argument 'address' not found", null);
-              return;
-          }
-  
-          final String address = (String) args.get("address");
-          if (address == null || address.isEmpty()) {
-              result.error("invalid_address", "bluetooth address cannot be null or empty", null);
-              return;
-          }
-  
-          this.curMacAddress = address;
-          disconnect();
-  
-          new DeviceConnFactoryManager.Build()
-                  .setConnMethod(DeviceConnFactoryManager.CONN_METHOD.BLUETOOTH)
-                  .setMacAddress(address)
-                  .build();
-  
-          threadPool = ThreadPool.getInstantiation();
-          threadPool.addSerialTask(new Runnable() {
-              @Override
-              public void run() {
-                  try {
-                      DeviceConnFactoryManager.getDeviceConnFactoryManagers().get(address).openPort();
-                  } catch (Exception e) {
-                      activity.runOnUiThread(() -> {
-                          result.error("connection_failed", "Failed to open bluetooth port: " + e.getMessage(), null);
-                      });
-                  }
-              }
-          });
-  
-          result.success(true);
-      } catch (Exception e) {
-          result.error("connection_error", "Failed to establish connection: " + e.getMessage(), null);
-      }
+  private void connect(MethodCall call, Result result){
+    Map<String, Object> args = call.arguments();
+    if (args !=null && args.containsKey("address")) {
+      final String address = (String) args.get("address");
+      this.curMacAddress = address;
+
+      disconnect();
+
+      new DeviceConnFactoryManager.Build()
+              //设置连接方式
+              .setConnMethod(DeviceConnFactoryManager.CONN_METHOD.BLUETOOTH)
+              //设置连接的蓝牙mac地址
+              .setMacAddress(address)
+              .build();
+
+      //打开端口
+      threadPool = ThreadPool.getInstantiation();
+      threadPool.addSerialTask(new Runnable() {
+        @Override
+        public void run() {
+          DeviceConnFactoryManager.getDeviceConnFactoryManagers().get(address).openPort();
+        }
+      });
+
+      result.success(true);
+    } else {
+      result.error("******************* invalid_argument", "argument 'address' not found", null);
+    }
+
   }
 
   /**
@@ -450,76 +404,40 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
 
   @SuppressWarnings("unchecked")
   private void print(MethodCall call, Result result) {
-      try {
-          Map<String, Object> args = call.arguments();
-          
-          final DeviceConnFactoryManager deviceConnFactoryManager = DeviceConnFactoryManager.getDeviceConnFactoryManagers().get(curMacAddress);
-          if (deviceConnFactoryManager == null || !deviceConnFactoryManager.getConnState()) {
-              result.error("not_connected", "Printer is not connected", null);
-              return;
-          }
-  
-          if (args == null) {
-              result.error("invalid_arguments", "Print arguments cannot be null", null);
-              return;
-          }
-  
-          if (!args.containsKey("config") || !args.containsKey("data")) {
-              result.error("missing_parameters", "Both config and data parameters are required", null);
-              return;
-          }
-  
-          final Map<String,Object> config = (Map<String,Object>)args.get("config");
-          final List<Map<String,Object>> list = (List<Map<String,Object>>)args.get("data");
-          
-          if (list == null || list.isEmpty()) {
-              result.error("invalid_data", "Print data cannot be null or empty", null);
-              return;
-          }
-  
-          threadPool = ThreadPool.getInstantiation();
-          threadPool.addSerialTask(new Runnable() {
-              @Override
-              public void run() {
-                  try {
-                      PrinterCommand printerCommand = deviceConnFactoryManager.getCurrentPrinterCommand();
-                      if (printerCommand == null) {
-                          activity.runOnUiThread(() -> {
-                              result.error("printer_error", "Unable to determine printer command type", null);
-                          });
-                          return;
-                      }
-  
-                      switch (printerCommand) {
-                          case ESC:
-                              deviceConnFactoryManager.sendDataImmediately(PrintContent.mapToReceipt(config, list));
-                              break;
-                          case TSC:
-                              deviceConnFactoryManager.sendDataImmediately(PrintContent.mapToLabel(config, list));
-                              break;
-                          case CPCL:
-                              deviceConnFactoryManager.sendDataImmediately(PrintContent.mapToCPCL(config, list));
-                              break;
-                          default:
-                              activity.runOnUiThread(() -> {
-                                  result.error("unsupported_printer", "Printer command type not supported", null);
-                              });
-                              return;
-                      }
-                      
-                      activity.runOnUiThread(() -> {
-                          result.success(null);
-                      });
-                  } catch (Exception e) {
-                      activity.runOnUiThread(() -> {
-                          result.error("print_error", "Failed to print: " + e.getMessage(), null);
-                      });
-                  }
-              }
-          });
-      } catch (Exception e) {
-          result.error("print_error", "Failed to process print request: " + e.getMessage(), null);
+    Map<String, Object> args = call.arguments();
+
+    final DeviceConnFactoryManager deviceConnFactoryManager = DeviceConnFactoryManager.getDeviceConnFactoryManagers().get(curMacAddress);
+    if (deviceConnFactoryManager == null || !deviceConnFactoryManager.getConnState()) {
+      result.error("not connect", "state not right", null);
+    }
+
+    if (args != null && args.containsKey("config") && args.containsKey("data")) {
+      final Map<String,Object> config = (Map<String,Object>)args.get("config");
+      final List<Map<String,Object>> list = (List<Map<String,Object>>)args.get("data");
+      if(list == null){
+        return;
       }
+
+      threadPool = ThreadPool.getInstantiation();
+      threadPool.addSerialTask(new Runnable() {
+        @Override
+        public void run() {
+          assert deviceConnFactoryManager != null;
+          PrinterCommand printerCommand = deviceConnFactoryManager.getCurrentPrinterCommand();
+
+          if (printerCommand == PrinterCommand.ESC) {
+            deviceConnFactoryManager.sendDataImmediately(PrintContent.mapToReceipt(config, list));
+          }else if (printerCommand == PrinterCommand.TSC) {
+            deviceConnFactoryManager.sendDataImmediately(PrintContent.mapToLabel(config, list));
+          }else if (printerCommand == PrinterCommand.CPCL) {
+            deviceConnFactoryManager.sendDataImmediately(PrintContent.mapToCPCL(config, list));
+          }
+        }
+      });
+    }else{
+      result.error("please add config or data", "", null);
+    }
+
   }
 
   @Override
