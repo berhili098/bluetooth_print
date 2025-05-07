@@ -28,7 +28,6 @@ import io.flutter.plugin.common.EventChannel.EventSink;
 import io.flutter.plugin.common.EventChannel.StreamHandler;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
-// import io.flutter.plugin.common.PluginRegistry.Registrar;
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener;
 
 import java.util.ArrayList;
@@ -70,16 +69,6 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
           Manifest.permission.ACCESS_FINE_LOCATION
   };
 
-  // public static void registerWith(Registrar registrar) {
-  //   final BluetoothPrintPlugin instance = new BluetoothPrintPlugin();
-
-  //   Activity activity = registrar.activity();
-  //   Application application = null;
-  //   if (registrar.context() != null) {
-  //     application = (Application) (registrar.context().getApplicationContext());
-  //   }
-  //   instance.setup(registrar.messenger(), application, activity, registrar, null);
-  // }
 
   public BluetoothPrintPlugin(){
   }
@@ -123,7 +112,6 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
           final BinaryMessenger messenger,
           final Application application,
           final Activity activity,
-          // final PluginRegistry.Registrar registrar,
           final ActivityPluginBinding activityBinding) {
     synchronized (initializationLock) {
       Log.i(TAG, "setup");
