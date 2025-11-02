@@ -17,6 +17,105 @@ import java.util.Vector;
  */
 public class PrintContent {
       private static final String TAG = PrintContent.class.getSimpleName();
+      private static final int DOTS_PER_MM = 8;
+      private static final int ESC_MAX_WIDTH_DOTS = 576;
+      private static final int LABEL_DEFAULT_WIDTH_DOTS = 300;
+
+      private PrintContent() {
+      }
+
+      private static int toInt(Object value, int defaultValue) {
+            if (value == null) {
+                  return defaultValue;
+            }
+            if (value instanceof Number) {
+                  return ((Number) value).intValue();
+            }
+            if (value instanceof String) {
+                  try {
+                        return Integer.parseInt(((String) value).trim());
+                  } catch (NumberFormatException ignore) {
+                  }
+            }
+            return defaultValue;
+      }
+
+      private static int readDots(Map<String, Object> source, String key) {
+            if (source == null || key == null) {
+                  return -1;
+            }
+            int raw = toInt(source.get(key), -1);
+            if (raw <= 0) {
+                  return -1;
+            }
+            if (raw <= 120) {
+                  return raw * DOTS_PER_MM;
+            }
+            return raw;
+      }
+
+      private static int resolveImageWidthDots(Map<String, Object> config,
+                                               Map<String, Object> item,
+                                               int fallbackDots) {
+            int candidate = readDots(item, "imageWidthDots");
+            if (candidate <= 0) {
+                  candidate = readDots(item, "imageMaxWidth");
+            }
+            if (candidate <= 0) {
+                  candidate = readDots(item, "imageWidth");
+            }
+            if (candidate <= 0) {
+                  candidate = readDots(config, "imageWidthDots");
+            }
+            if (candidate <= 0) {
+                  candidate = readDots(config, "imageMaxWidth");
+            }
+            if (candidate <= 0) {
+                  candidate = readDots(config, "imageWidth");
+            }
+            if (candidate <= 0 && config != null) {
+                  int configWidthMm = toInt(config.get("width"), -1);
+                  if (configWidthMm > 0) {
+                        candidate = configWidthMm * DOTS_PER_MM;
+                  }
+            }
+            if (candidate <= 0) {
+                  candidate = fallbackDots;
+            }
+            return candidate;
+      }
+
+      private static int normalizeWidth(int widthDots) {
+            if (widthDots <= 0) {
+                  return 0;
+            }
+            int normalized = widthDots - (widthDots % 8);
+            if (normalized <= 0) {
+                  normalized = 8;
+            }
+            return normalized;
+      }
+
+      private static Bitmap scaleBitmapToWidth(Bitmap bitmap,
+                                               int requestedWidthDots,
+                                               int absoluteMaxDots) {
+            if (bitmap == null) {
+                  return null;
+            }
+            int safeMax = absoluteMaxDots > 0 ? absoluteMaxDots : bitmap.getWidth();
+            int target = requestedWidthDots > 0 ? requestedWidthDots : bitmap.getWidth();
+            target = Math.min(target, safeMax);
+            target = Math.min(target, bitmap.getWidth());
+            target = normalizeWidth(target);
+            if (target <= 0) {
+                  target = normalizeWidth(Math.min(bitmap.getWidth(), safeMax));
+            }
+            if (target <= 0 || bitmap.getWidth() == target) {
+                  return bitmap;
+            }
+            int targetHeight = Math.max(1, Math.round(bitmap.getHeight() * (target / (float) bitmap.getWidth())));
+            return Bitmap.createScaledBitmap(bitmap, target, targetHeight, true);
+      }
 
       /**
        * 票据打印对象转换
@@ -91,7 +190,16 @@ public class PrintContent {
                   }else if("image".equals(type)){
                         byte[] bytes = Base64.decode(content, Base64.DEFAULT);
                         Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                        esc.addRastBitImage(bitmap, 576, 0);
+                        if (bitmap != null) {
+                              int targetWidthDots = resolveImageWidthDots(config, m, ESC_MAX_WIDTH_DOTS);
+                              Bitmap printableBitmap = scaleBitmapToWidth(bitmap, targetWidthDots, ESC_MAX_WIDTH_DOTS);
+                              esc.addRastBitImage(printableBitmap, printableBitmap.getWidth(), 0);
+                              if (printableBitmap != bitmap) {
+                                    bitmap.recycle();
+                              }
+                        } else {
+                              Log.w(TAG, "Unable to decode image content for receipt printing");
+                        }
                   }
 
                   if(linefeed == 1){
@@ -164,7 +272,27 @@ public class PrintContent {
                   }else if("image".equals(type)){
                         byte[] bytes = Base64.decode(content, Base64.DEFAULT);
                         Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                        tsc.addBitmap(x, y, LabelCommand.BITMAP_MODE.OVERWRITE, 300, bitmap);
+                        if (bitmap != null) {
+                      int labelWidthMm = toInt(config == null ? null : config.get("width"), 60);
+                      int labelMaxDots = labelWidthMm > 0 ? labelWidthMm * DOTS_PER_MM : LABEL_DEFAULT_WIDTH_DOTS;
+                      int absoluteMaxDots = labelMaxDots > 0 ? labelMaxDots : LABEL_DEFAULT_WIDTH_DOTS;
+                      int fallbackDots = LABEL_DEFAULT_WIDTH_DOTS;
+                      if (absoluteMaxDots > 0) {
+                            fallbackDots = Math.min(fallbackDots, absoluteMaxDots);
+                      }
+                      if (fallbackDots <= 0) {
+                            fallbackDots = LABEL_DEFAULT_WIDTH_DOTS;
+                      }
+                      int targetWidthDots = resolveImageWidthDots(config, m, fallbackDots);
+                              Bitmap printableBitmap = scaleBitmapToWidth(bitmap, targetWidthDots, absoluteMaxDots);
+                              tsc.addBitmap(x, y, LabelCommand.BITMAP_MODE.OVERWRITE,
+                                      normalizeWidth(printableBitmap.getWidth()), printableBitmap);
+                              if (printableBitmap != bitmap) {
+                                    bitmap.recycle();
+                              }
+                        } else {
+                              Log.w(TAG, "Unable to decode image content for label printing");
+                        }
                   }
             }
 
