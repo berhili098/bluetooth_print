@@ -96,6 +96,17 @@ public class PrintContent {
             return normalized;
       }
 
+      private static EscCommand.JUSTIFICATION resolveJustification(int align) {
+            switch (align) {
+                  case 1:
+                        return EscCommand.JUSTIFICATION.CENTER;
+                  case 2:
+                        return EscCommand.JUSTIFICATION.RIGHT;
+                  default:
+                        return EscCommand.JUSTIFICATION.LEFT;
+            }
+      }
+
       private static Bitmap scaleBitmapToWidth(Bitmap bitmap,
                                                int requestedWidthDots,
                                                int absoluteMaxDots) {
@@ -131,34 +142,42 @@ public class PrintContent {
             for (Map<String,Object> m: list) {
                   String type = (String)m.get("type");
                   String content = (String)m.get("content");
-                  int align = (int)(m.get("align")==null?0:m.get("align"));
-                  int size = (int)(m.get("size")==null?3:m.get("size"));
-                  int weight = (int)(m.get("weight")==null?0:m.get("weight"));
-                  int width = (int)(m.get("width")==null?0:m.get("width"));
-                  int height = (int)(m.get("height")==null?0:m.get("height"));
-                  int underline = (int)(m.get("underline")==null?0:m.get("underline"));
-                  int linefeed = (int)(m.get("linefeed")==null?0:m.get("linefeed"));
+                  int align = toInt(m.get("align"), 0);
+                  int size = toInt(m.get("size"), 3);
+                  int weight = toInt(m.get("weight"), 0);
+                  int width = toInt(m.get("width"), 0);
+                  int height = toInt(m.get("height"), 0);
+                  int underline = toInt(m.get("underline"), 0);
+                  int linefeed = toInt(m.get("linefeed"), 0);
 
-                  EscCommand.ENABLE emphasized = weight==0?EscCommand.ENABLE.OFF:EscCommand.ENABLE.ON;
-                  EscCommand.ENABLE doublewidth = width==0?EscCommand.ENABLE.OFF:EscCommand.ENABLE.ON;
-                  EscCommand.ENABLE doubleheight = height==0?EscCommand.ENABLE.OFF:EscCommand.ENABLE.ON;
-                  EscCommand.ENABLE isUnderline = underline==0?EscCommand.ENABLE.OFF:EscCommand.ENABLE.ON;
+                  EscCommand.ENABLE emphasized =
+                          weight == 0 ? EscCommand.ENABLE.OFF : EscCommand.ENABLE.ON;
+                  EscCommand.ENABLE doublewidth =
+                          width == 0 ? EscCommand.ENABLE.OFF : EscCommand.ENABLE.ON;
+                  EscCommand.ENABLE doubleheight =
+                          height == 0 ? EscCommand.ENABLE.OFF : EscCommand.ENABLE.ON;
+                  EscCommand.ENABLE isUnderline =
+                          underline == 0 ? EscCommand.ENABLE.OFF : EscCommand.ENABLE.ON;
 
                   // 设置打印位置
-                  esc.addSelectJustification(align==0?EscCommand.JUSTIFICATION.LEFT:(align==1?EscCommand.JUSTIFICATION.CENTER:EscCommand.JUSTIFICATION.RIGHT));
+                  esc.addSelectJustification(resolveJustification(align));
 
                   if("text".equals(type)){
-                        int absolutePos = (int)(m.get("absolutePos")==null?0:m.get("absolutePos"));
-                        int relativePos = (int)(m.get("relativePos")==null?0:m.get("relativePos"));
-                        int fontZoom = (int)(m.get("fontZoom")==null?1:m.get("fontZoom"));
+                        int absolutePos = toInt(m.get("absolutePos"), 0);
+                        int relativePos = toInt(m.get("relativePos"), 0);
+                        int fontZoom = toInt(m.get("fontZoom"), 1);
                         short aPos = (short)absolutePos;
                         short rPos = (short)relativePos;
                         Log.e(TAG,"******************* absolutePos: " + aPos +", relativePos: " + rPos +", fontZoom: " + fontZoom);
 
                         // 设置绝对打印位置，将当前打印位置设置到距离行首 n* hor_motion_unit 点
-                        esc.addSetAbsolutePrintPosition(aPos);
+                        if (absolutePos > 0) {
+                              esc.addSetAbsolutePrintPosition(aPos);
+                        }
                         // 设置相对打印位置，将打印位置设置到距当前位置 n 点处
-                        esc.addSetRelativePrintPositon(rPos);
+                        if (relativePos > 0) {
+                              esc.addSetRelativePrintPositon(rPos);
+                        }
                         // 设置为倍高倍宽
                         esc.addSelectPrintModes(EscCommand.FONT.FONTA, emphasized, doubleheight, doublewidth, isUnderline);
                         if(fontZoom>1){
