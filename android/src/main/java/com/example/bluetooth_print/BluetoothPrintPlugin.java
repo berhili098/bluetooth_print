@@ -131,14 +131,24 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
 
   private void tearDown() {
     Log.i(TAG, "teardown");
+    // Release any live printer connection and stop the worker thread so the
+    // native singletons (ThreadPool / DeviceConnFactoryManager) don't survive
+    // across engine re-attaches holding a dead connection.
+    destroy();
     context = null;
     if (activityBinding != null) {
       activityBinding.removeRequestPermissionsResultListener(this);
     }
     activityBinding = null;
-    channel.setMethodCallHandler(null);
+    // Null-guard: tearDown() can run before setup() populated these (e.g. a
+    // detach before attach during a fast lifecycle change), so don't NPE.
+    if (channel != null) {
+      channel.setMethodCallHandler(null);
+    }
     channel = null;
-    stateChannel.setStreamHandler(null);
+    if (stateChannel != null) {
+      stateChannel.setStreamHandler(null);
+    }
     stateChannel = null;
     mBluetoothAdapter = null;
     mBluetoothManager = null;
@@ -163,9 +173,17 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
       case "isOn":
         result.success(mBluetoothAdapter.isEnabled());
         break;
-      case "isConnected":
-        result.success(threadPool != null);
+      case "isConnected": {
+        // Report the REAL connection state, not just "a worker thread exists".
+        // The old `threadPool != null` check stayed true after the printer
+        // dropped (e.g. overnight), so the app believed it was still connected,
+        // never reconnected, and printing silently failed until reinstall.
+        DeviceConnFactoryManager dm =
+            DeviceConnFactoryManager.getDeviceConnFactoryManagers().get(curMacAddress);
+        boolean reallyConnected = threadPool != null && dm != null && dm.getConnState();
+        result.success(reallyConnected);
         break;
+      }
       case "startScan":
       {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
@@ -310,15 +328,24 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
     Map<String, Object> args = call.arguments();
     if (args !=null && args.containsKey("address")) {
       final String address = (String) args.get("address");
-      this.curMacAddress = address;
 
+      // Disconnect the PREVIOUS device before switching curMacAddress:
+      // disconnect() looks the manager up by curMacAddress, so reassigning
+      // first made it a no-op when the user switched printers and leaked the
+      // old socket for the lifetime of the process.
       disconnect();
+      this.curMacAddress = address;
 
       new DeviceConnFactoryManager.Build()
               //设置连接方式
               .setConnMethod(DeviceConnFactoryManager.CONN_METHOD.BLUETOOTH)
               //设置连接的蓝牙mac地址
               .setMacAddress(address)
+              // Without a context the SDK's precise state broadcasts
+              // (CONNECTED after the printer answers, FAILED on open error)
+              // are silently dropped — the app could only guess from raw ACL
+              // events, which fire for ANY bluetooth device.
+              .setContext(context)
               .build();
 
       //打开端口
@@ -343,7 +370,11 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
   private boolean disconnect(){
     DeviceConnFactoryManager deviceConnFactoryManager = DeviceConnFactoryManager.getDeviceConnFactoryManagers().get(curMacAddress);
     if(deviceConnFactoryManager != null && deviceConnFactoryManager.mPort != null) {
-      deviceConnFactoryManager.reader.cancel();
+      // reader can already be null if closePort() ran concurrently (closeAllPort
+      // nulls it), so guard before cancelling to avoid an NPE.
+      if (deviceConnFactoryManager.reader != null) {
+        deviceConnFactoryManager.reader.cancel();
+      }
       deviceConnFactoryManager.closePort();
       deviceConnFactoryManager.mPort = null;
     }
@@ -450,15 +481,52 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
         final String action = intent.getAction();
         Log.d(TAG, "stateStreamHandler, current action: " + action);
 
+        // The receiver can outlive a cancelled sink (broadcasts are async);
+        // without this guard any bluetooth event after cancel crashed the app.
+        if (sink == null) {
+          return;
+        }
+
         if (BluetoothAdapter.ACTION_STATE_CHANGED.equals(action)) {
           threadPool = null;
           sink.success(intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1));
         } else if (BluetoothDevice.ACTION_ACL_CONNECTED.equals(action)) {
-          sink.success(1);
+          // Only report OUR printer. ACL events fire for every bluetooth
+          // device (headsets, watches, car kits) and used to flip the app's
+          // connection state at random.
+          if (isCurrentPrinter(intent)) {
+            sink.success(1);
+          }
         } else if (BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(action)) {
-          threadPool = null;
-          sink.success(0);
+          if (isCurrentPrinter(intent)) {
+            threadPool = null;
+            sink.success(0);
+          }
+        } else if (DeviceConnFactoryManager.ACTION_CONN_STATE.equals(action)) {
+          // Precise state from the printer SDK (enabled by setContext in
+          // connect()). FAILED lets the app stop waiting immediately instead
+          // of timing out on a CONNECTED event that will never come.
+          final String deviceId =
+              intent.getStringExtra(DeviceConnFactoryManager.DEVICE_ID);
+          if (curMacAddress == null || !curMacAddress.equalsIgnoreCase(deviceId)) {
+            return;
+          }
+          final int state =
+              intent.getIntExtra(DeviceConnFactoryManager.STATE, -1);
+          if (state == DeviceConnFactoryManager.CONN_STATE_CONNECTED) {
+            sink.success(1);
+          } else if (state == DeviceConnFactoryManager.CONN_STATE_FAILED) {
+            sink.success(-2);
+          }
         }
+      }
+
+      private boolean isCurrentPrinter(Intent intent) {
+        final BluetoothDevice device =
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+        return device != null
+            && curMacAddress != null
+            && curMacAddress.equalsIgnoreCase(device.getAddress());
       }
     };
 
@@ -469,13 +537,22 @@ public class BluetoothPrintPlugin implements FlutterPlugin, ActivityAware, Metho
       filter.addAction(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED);
       filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
       filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
-      context.registerReceiver(mReceiver, filter);
+      filter.addAction(DeviceConnFactoryManager.ACTION_CONN_STATE);
+      // Android 14+ requires an explicit export flag for receivers listening
+      // to non-system actions (ACTION_CONN_STATE); registering without one
+      // throws SecurityException and would kill the whole state stream.
+      ContextCompat.registerReceiver(
+          context, mReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     @Override
     public void onCancel(Object o) {
       sink = null;
-      context.unregisterReceiver(mReceiver);
+      try {
+        context.unregisterReceiver(mReceiver);
+      } catch (IllegalArgumentException ignored) {
+        // Already unregistered (double-cancel during engine teardown).
+      }
     }
   };
 
